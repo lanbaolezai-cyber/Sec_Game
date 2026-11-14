@@ -86,7 +86,7 @@ export function PlayerShop({
 
   function handleItemClick(item: ShopItem) {
     setMessage(null);
-    if (item.effect_type === 'riddle_trap') {
+    if (item.effect_type === 'riddle_trap' || item.effect_type === 'kolam_lock') {
       setTrapItem(item);
       return;
     }
@@ -133,7 +133,9 @@ export function PlayerShop({
             <div>
               <h3 className="font-display font-semibold text-gold-100">Choose a rival team</h3>
               <p className="text-gold-200/60 text-xs mt-0.5">
-                They will get a riddle they must solve before they can roll again.
+                {trapItem.effect_type === 'kolam_lock'
+                  ? 'Their board will be locked with a Kolam pattern they must solve before rolling.'
+                  : 'They will get a riddle they must solve before they can roll again.'}
               </p>
             </div>
             {rivals.length === 0 ? (
