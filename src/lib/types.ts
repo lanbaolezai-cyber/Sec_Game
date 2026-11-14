@@ -112,3 +112,14 @@ export interface Admin {
   pin: string;
   created_at: string;
 }
+
+export type KolamCell = 'filled' | 'empty' | 'target';
+
+export interface OpenKolam {
+  id: string;
+  ownerName: string;
+  patternIndex: number;
+  grid: KolamCell[][];
+  options: string[];
+  correctOption: string;
+}

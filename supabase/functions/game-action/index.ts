@@ -1,5 +1,6 @@
 import { createClient } from "npm:@supabase/supabase-js@2.57.4";
 import { RIDDLES, isCorrectAnswer } from "./riddles.ts";
+import { KOLAM_PATTERNS, isCorrectKolamAnswer } from "./kolams.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -340,6 +341,12 @@ Deno.serve(async (req: Request) => {
         .limit(1).maybeSingle();
       if (openTrap) return json({ error: "Solve the riddle trap before you roll" }, 400);
 
+      const { data: openLock } = await supabase
+        .from("kolam_locks").select("id")
+        .eq("target_team_id", teamId).eq("status", "armed")
+        .limit(1).maybeSingle();
+      if (openLock) return json({ error: "Solve the Kolam Lock before you roll" }, 400);
+
       // Use per-team board tiles
       const tiles = await getTeamTiles(teamId);
       if (!tiles || tiles.length === 0) return json({ error: "Board not configured" }, 400);
@@ -629,6 +636,38 @@ Deno.serve(async (req: Request) => {
           });
           if (trapError) return json({ error: "Could not set the trap. Please try again." }, 500);
         }
+      } else if (item.effect_type === "kolam_lock") {
+        if (!targetTeamId) return json({ error: "Choose a team to target" }, 400);
+        if (targetTeamId === teamId) return json({ error: "You cannot target your own team" }, 400);
+        const { data: t } = await supabase
+          .from("teams").select("id, name").eq("id", targetTeamId).maybeSingle();
+        if (!t) return json({ error: "Target team not found" }, 404);
+        target = t;
+
+        // Check for active shield (same as riddle_trap)
+        const { data: shield } = await supabase
+          .from("riddle_shields").select("id")
+          .eq("team_id", target.id).eq("status", "active")
+          .order("created_at").limit(1).maybeSingle();
+        if (shield) {
+          const { data: consumed, error: consumeError } = await supabase
+            .from("riddle_shields")
+            .update({ status: "used", used_at: new Date().toISOString() })
+            .eq("id", shield.id).eq("status", "active")
+            .select("id").maybeSingle();
+          if (consumeError) return json({ error: "Could not set the lock. Please try again." }, 500);
+          shieldBlocked = consumed !== null;
+        }
+
+        if (!shieldBlocked) {
+          const { error: lockError } = await supabase.from("kolam_locks").insert({
+            owner_team_id: teamId,
+            target_team_id: target.id,
+            pattern_index: Math.floor(Math.random() * KOLAM_PATTERNS.length),
+            triggered_at: new Date().toISOString(),
+          });
+          if (lockError) return json({ error: "Could not set the lock. Please try again." }, 500);
+        }
       }
 
       await supabase.from("transactions").insert({
@@ -771,6 +810,70 @@ Deno.serve(async (req: Request) => {
         .eq("id", trap.id).eq("status", "armed")
         .select("id").maybeSingle();
       if (solveError || !solved) return json({ error: "This riddle was already answered" }, 409);
+
+      return json({ correct: true });
+    }
+
+    // ── KOLAM LOCK: fetch the open lock for a team ──
+    if (action === "kolam-status") {
+      const { teamId, sessionToken } = body;
+      if (!teamId) return json({ error: "Missing teamId" }, 400);
+
+      if (sessionToken) {
+        const { data: validId } = await supabase.rpc("validate_session", { p_token: sessionToken });
+        if (!validId || validId !== teamId) {
+          return json({ error: "Session expired — please log in again" }, 401);
+        }
+      }
+
+      const { data: lock } = await supabase
+        .from("kolam_locks").select("id, owner_team_id, pattern_index")
+        .eq("target_team_id", teamId).eq("status", "armed")
+        .order("created_at").limit(1).maybeSingle();
+      if (!lock) return json({ lock: null });
+
+      const { data: owner } = await supabase
+        .from("teams").select("name").eq("id", lock.owner_team_id).maybeSingle();
+      const pattern = KOLAM_PATTERNS[lock.pattern_index] ?? KOLAM_PATTERNS[0];
+      return json({
+        lock: {
+          id: lock.id,
+          ownerName: owner?.name ?? "A rival team",
+          patternIndex: lock.pattern_index,
+          grid: pattern.grid,
+          options: pattern.options,
+          correctOption: pattern.correctOption,
+        },
+      });
+    }
+
+    // ── KOLAM LOCK: check an answer; a correct one frees the team to roll ──
+    if (action === "kolam-answer") {
+      const { teamId, sessionToken, lockId, answer } = body;
+      if (!teamId || !lockId) return json({ error: "Missing parameters" }, 400);
+      if (!answer || typeof answer !== "string") return json({ error: "Pick an option first" }, 400);
+
+      if (sessionToken) {
+        const { data: validId } = await supabase.rpc("validate_session", { p_token: sessionToken });
+        if (!validId || validId !== teamId) {
+          return json({ error: "Session expired — please log in again" }, 401);
+        }
+      }
+
+      const { data: lock } = await supabase
+        .from("kolam_locks").select("id, pattern_index")
+        .eq("id", lockId).eq("target_team_id", teamId).eq("status", "armed")
+        .maybeSingle();
+      if (!lock) return json({ error: "No open Kolam Lock to solve" }, 404);
+
+      if (!isCorrectKolamAnswer(lock.pattern_index, answer)) return json({ correct: false });
+
+      const { data: solved, error: solveError } = await supabase
+        .from("kolam_locks")
+        .update({ status: "solved", solved_at: new Date().toISOString() })
+        .eq("id", lock.id).eq("status", "armed")
+        .select("id").maybeSingle();
+      if (solveError || !solved) return json({ error: "This Kolam Lock was already solved" }, 409);
 
       return json({ correct: true });
     }

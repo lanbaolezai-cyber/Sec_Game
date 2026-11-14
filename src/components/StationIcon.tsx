@@ -1,6 +1,6 @@
 import {
   Brain, Puzzle, Scroll, Shirt, Zap, Circle, Palette,
-  Coffee, Star, ScanLine, Waypoints, ShieldCheck,
+  Coffee, Star, ScanLine, Waypoints, ShieldCheck, Grid3x3,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 
@@ -18,6 +18,7 @@ const ICONS: Record<string, LucideIcon> = {
   flame: Star,
   star: Star,
   'shield-check': ShieldCheck,
+  grid: Grid3x3,
 };
 
 export function StationIcon({ icon, className = 'w-6 h-6' }: { icon: string; className?: string }) {
